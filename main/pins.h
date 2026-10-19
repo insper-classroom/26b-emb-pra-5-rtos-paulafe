@@ -9,5 +9,6 @@
 #define LED_PIN_B 9
 
 #define SSD1306_PIN_LITE 15
-
+#define TRIG_PIN 14
+#define ECHO_PIN 16
 #endif // PINS_H
