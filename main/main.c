@@ -22,40 +22,35 @@
 #include "pins.h"
 #include "ssd1306.h"
 
-// === Pinos do HC-SR04 ===
-// GP14 e GP16 são do conector do LCD, livres quando o LCD não é usado.
-// const int TRIG_PIN = 14;
-// const int ECHO_PIN = 16;
-
-// === Constantes do sensor ===
-const int TRIGGER_PULSE_US = 10;    // largura do pulso de trigger (datasheet)
-const int TRIGGER_PERIOD_MS = 300;  // intervalo entre leituras (>= 60 ms)
-const int US_POR_CM = 58;           // som ida e volta: ~58 us por cm
-const int DIST_MAX_CM = 400;        // alcance máximo do HC-SR04
+// === Constantes do sensor (TRIG_PIN e ECHO_PIN vêm do pins.h) ===
+#define TRIGGER_PULSE_US 10    // largura do pulso de trigger (datasheet)
+#define TRIGGER_PERIOD_MS 300  // intervalo entre leituras (>= 60 ms)
+#define US_POR_CM 58           // som ida e volta: ~58 us por cm
+#define DIST_MAX_CM 400        // alcance máximo do HC-SR04
 
 // Maior pulso de echo válido: 400 cm * 58 us = 23,2 ms. Arredondado para cima.
-const int ECHO_FALL_TIMEOUT_MS = 30;
+#define ECHO_FALL_TIMEOUT_MS 30
 
 // Tempo que a oled_task espera pela distância depois do trigger.
 // Precisa cobrir o maior echo válido (~23 ms) e ser menor que TRIGGER_PERIOD_MS.
-const int DISTANCE_TIMEOUT_MS = 50;
+#define DISTANCE_TIMEOUT_MS 50
 
 // === Constantes de display e LED ===
-const int OLED_I2C_FREQ_HZ = 400000;
-const int OLED_SDA_PIN = 2;
-const int OLED_SCL_PIN = 3;
-const int OLED_ADDR = 0x3C;
-const int OLED_WIDTH = 128;
-const int OLED_HEIGHT = 64;
-const int BAR_Y = 28;
-const int BAR_HEIGHT = 4;
-const int LED_LIMITE_CM = 100;      // até 1 m: verde; acima: amarelo
+#define OLED_I2C_FREQ_HZ 400000
+#define OLED_SDA_PIN 2
+#define OLED_SCL_PIN 3
+#define OLED_ADDR 0x3C
+#define OLED_WIDTH 128
+#define OLED_HEIGHT 64
+#define BAR_Y 28
+#define BAR_HEIGHT 4
+#define LED_LIMITE_CM 100  // até 1 m: verde; acima: amarelo
 
 // === Tamanhos das filas e stacks ===
-const int TIME_QUEUE_LEN = 4;
-const int DISTANCE_QUEUE_LEN = 4;
-const int TASK_STACK_SIZE = 4096;
-const int TASK_PRIORITY = 1;
+#define TIME_QUEUE_LEN 4
+#define DISTANCE_QUEUE_LEN 4
+#define TASK_STACK_SIZE 4096
+#define TASK_PRIORITY 1
 
 // === Recursos do RTOS (únicos globais permitidos pela regra 4.4) ===
 static QueueHandle_t xQueueTime = NULL;
@@ -145,7 +140,7 @@ void trigger_task(void *p) {
 
     while (1) {
         gpio_put(TRIG_PIN, 1);
-        sleep_us(TRIGGER_PULSE_US); // regra 4.3: exceção para delay em us
+        sleep_us(TRIGGER_PULSE_US);  // regra 4.3: exceção para delay em us
         gpio_put(TRIG_PIN, 0);
 
         xSemaphoreGive(xSemaphoreTrigger);
@@ -158,11 +153,11 @@ void trigger_task(void *p) {
 void echo_task(void *p) {
     gpio_init(ECHO_PIN);
     gpio_set_dir(ECHO_PIN, GPIO_IN);
-    gpio_pull_down(ECHO_PIN); // evita bordas espúrias com o sensor desconectado
+    gpio_pull_down(ECHO_PIN);  // evita bordas espúrias com o sensor desconectado
 
     // Habilitada aqui: o callback é atendido pelo core que configurou a IRQ.
-    gpio_set_irq_enabled_with_callback(ECHO_PIN, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true,
-                                       &pin_callback);
+    gpio_set_irq_enabled_with_callback(
+        ECHO_PIN, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true, &pin_callback);
 
     uint64_t t_rise;
     uint64_t t_fall;
@@ -174,7 +169,8 @@ void echo_task(void *p) {
         }
 
         // Borda de descida: se não vier a tempo, descarta e ressincroniza.
-        if (xQueueReceive(xQueueTime, &t_fall, pdMS_TO_TICKS(ECHO_FALL_TIMEOUT_MS)) != pdTRUE) {
+        if (xQueueReceive(xQueueTime, &t_fall,
+                          pdMS_TO_TICKS(ECHO_FALL_TIMEOUT_MS)) != pdTRUE) {
             xQueueReset(xQueueTime);
             continue;
         }
@@ -191,7 +187,7 @@ void echo_task(void *p) {
 
 // === oled_task: exibe distância/falha no OLED e no LED ===
 void oled_task(void *p) {
-    ssd1306_t disp; // local: regra 4.4
+    ssd1306_t disp;  // local: regra 4.4
     oled_display_init(&disp);
     led_rgb_init();
     led_rgb_set(false, false, false);
@@ -204,20 +200,19 @@ void oled_task(void *p) {
             continue;
         }
 
-        if (xQueueReceive(xQueueDistance, &dist_cm, pdMS_TO_TICKS(DISTANCE_TIMEOUT_MS)) == pdTRUE) {
+        if (xQueueReceive(xQueueDistance, &dist_cm,
+                          pdMS_TO_TICKS(DISTANCE_TIMEOUT_MS)) == pdTRUE) {
             // Dado chegou no tempo certo.
             oled_show_distance(&disp, dist_cm);
             if (dist_cm <= LED_LIMITE_CM) {
-                led_rgb_set(false, true, false); // verde
+                led_rgb_set(false, true, false);  // verde
+            } else {
+                led_rgb_set(true, true, false);  // amarelo = vermelho + verde
             }
-            else {
-                led_rgb_set(true, true, false); // amarelo = vermelho + verde
-            }
-        }
-        else {
+        } else {
             // Dado não chegou: falha no sensor.
             oled_show_failure(&disp);
-            led_rgb_set(true, false, false); // vermelho
+            led_rgb_set(true, false, false);  // vermelho
         }
     }
 }
@@ -229,13 +224,15 @@ int main() {
     xQueueDistance = xQueueCreate(DISTANCE_QUEUE_LEN, sizeof(int));
     xSemaphoreTrigger = xSemaphoreCreateBinary();
 
-    if (xQueueTime == NULL || xQueueDistance == NULL || xSemaphoreTrigger == NULL) {
+    if (xQueueTime == NULL || xQueueDistance == NULL ||
+        xSemaphoreTrigger == NULL) {
         while (1) {
             // falha ao criar recursos do RTOS
         }
     }
 
-    xTaskCreate(trigger_task, "Trigger", TASK_STACK_SIZE, NULL, TASK_PRIORITY, NULL);
+    xTaskCreate(trigger_task, "Trigger", TASK_STACK_SIZE, NULL, TASK_PRIORITY,
+                NULL);
     xTaskCreate(echo_task, "Echo", TASK_STACK_SIZE, NULL, TASK_PRIORITY, NULL);
     xTaskCreate(oled_task, "OLED", TASK_STACK_SIZE, NULL, TASK_PRIORITY, NULL);
 
